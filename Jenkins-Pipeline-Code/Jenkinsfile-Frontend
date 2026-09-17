@@ -1,0 +1,122 @@
+// first version in frontend
+pipeline {
+    agent any // Use any available Jenkins agent to run this pipeline
+
+    stages {
+        stage('Cleaning Workspace') {
+            steps {
+                cleanWs() // Clean up any files from previous builds in the Jenkins workspace
+            }
+        }
+
+        stage('Checkout from Git') {
+            steps {
+                // Clone the 'master' branch of your GitHub repository
+                git branch: 'master', url: 'https://github.com/arumullayaswanth/Fullstack-nodejs-aws-eks-project.git'
+            }
+        }
+
+        stage("Docker Image Build") {
+            steps {
+                script {
+                    // Change directory into the 'client' folder, which contains the frontend code
+                    dir('client') {
+                        sh 'docker system prune -f' // Clean up unused Docker images/containers/networks/volumes
+                        sh 'docker container prune -f' // Remove stopped containers
+                        sh 'docker build -t frontend .' // Build Docker image for the frontend and tag it as 'frontend'
+                    }
+                }
+            }
+        }
+
+        stage("ECR Image Pushing") {
+            steps {
+                script {
+                    // Shell script to authenticate with AWS ECR and push Docker image
+                    sh '''
+                    aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 069416262331.dkr.ecr.us-east-1.amazonaws.com
+                    docker tag frontend:latest 069416262331.dkr.ecr.us-east-1.amazonaws.com/frontend:${BUILD_NUMBER}
+                    docker push 069416262331.dkr.ecr.us-east-1.amazonaws.com/frontend:${BUILD_NUMBER}
+                    '''
+                    // Steps:
+                    // 1. Log in to AWS ECR using credentials from `aws ecr get-login-password`
+                    // 2. Tag the image with your ECR repo and the Jenkins build number
+                    // 3. Push the image to your ECR repository
+                }
+            }
+        }
+
+        stage('Update Deployment file') {
+            environment {
+                // Define environment variables for use in this stage
+                GIT_REPO_NAME = "Fullstack-nodejs-aws-eks-project"
+                GIT_USER_NAME = "arumullayaswanth"
+            }
+            steps {
+                // Move into the 'kubernetes-files' directory
+                dir('kubernetes-files') {
+                    // Use stored GitHub personal access token (PAT) credential
+                    withCredentials([string(credentialsId: 'my-git-pattoken', variable: 'git_token')]) {
+                        sh '''
+                            # Set Git user email for committing
+                            git config user.email "Yaswanth.arumulla@gmail.com"
+                        
+                            # Set Git user name for committing
+                            git config user.name "arumullayaswanth"
+                        
+                            # Capture Jenkins build number into a shell variable
+                            BUILD_NUMBER=${BUILD_NUMBER}
+                        
+                            # Print the build number (for debugging/logging)
+                            echo $BUILD_NUMBER
+                        
+                            # Replace the image line in the YAML with the new image tag using sed
+                            sed -i "s#image:.*#image: 069416262331.dkr.ecr.us-east-1.amazonaws.com/frontend:$BUILD_NUMBER#g" frontend-deploy-service.yaml
+                        
+                            # Stage the modified deployment file for commit
+                            git add .
+                        
+                            # Commit the change with a message including the build number
+                            git commit -m "Update deployment Image to version \${BUILD_NUMBER}"
+                        
+                            # Push the commit back to GitHub using the stored personal access token (PAT)
+                            git push https://${git_token}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME} HEAD:master
+                        '''
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
